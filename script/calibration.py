@@ -147,12 +147,17 @@ def make_set_predictions(testset, valset,alpha = 0.1,classifyHost=False, knownZ=
     topclass_setpred = []
     point_pred = []
     for i in tqdm(range(len(testset.spectra_list))):
-        predlabels, aggr_softmax = predict_just_class_for_one_star(testset.spectra_list[i],
+        try:
+            predlabels, aggr_softmax = predict_just_class_for_one_star(testset.spectra_list[i],
                                                                    testset.redshift_list[i], classifyHost, 
                                                                    knownZ, smooth, rlapScores)
-        point_pred.append(predlabels[np.argmax(aggr_softmax)])
-        conformal_setpred.append(conformal_set(aggr_softmax, predlabels, conformal_cut))
-        topclass_setpred.append(top_class_set(aggr_softmax, predlabels, alpha, False))
+            point_pred.append(predlabels[np.argmax(aggr_softmax)])
+            conformal_setpred.append(conformal_set(aggr_softmax, predlabels, conformal_cut))
+            topclass_setpred.append(top_class_set(aggr_softmax, predlabels, alpha, False))
+        except:
+            point_pred.append("ERROR")
+            conformal_setpred.append(np.array(["ERROR"]))
+            topclass_setpred.append(np.array(["ERROR"]))
 
     return testset.type_list, point_pred, conformal_setpred, topclass_setpred, conformal_cut
     
