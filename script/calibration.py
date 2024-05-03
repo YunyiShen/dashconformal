@@ -39,11 +39,11 @@ def aggregate_softmax(SNlabels, softmaxscore):
 def predict_just_class_for_one_star(filenames, redshift, 
                         classifyHost=False, knownZ=True, 
                         smooth=6, rlapScores=True):
-    classification = astrodash.Classify([filenames], [redshift], classifyHost, 
-                                        knownZ, smooth, rlapScores)
+    classification = astrodash.Classify([filenames], [redshift], classifyHost=classifyHost, 
+                                        knownZ=knownZ, smooth = smooth, rlapScores = rlapScores)
     
     bestTypes, softmaxes, bestLabels, inputImages, inputMinMaxIndexes = classification._input_spectra_info()
-    SNlabels, aggr_softmax = aggregate_softmax(bestTypes[0], softmaxes[0])
+    SNlabels, aggr_softmax = aggregate_softmax(extract_just_class(bestTypes[0]), softmaxes[0])
     SNlabels = clean_labels(SNlabels)
     return SNlabels, aggr_softmax
 
@@ -64,8 +64,8 @@ def extract_correct_softmax(filenames, redshift, trueclass,
     '''
     assert len(filenames) == len(redshift)
     assert len(filenames) == len(trueclass)
-    classification = astrodash.Classify(filenames, redshift, classifyHost, 
-                                        knownZ, smooth, rlapScores)
+    classification = astrodash.Classify(filenames, redshift, classifyHost = classifyHost, 
+                                        knownZ = knownZ, smooth = smooth, rlapScores = rlapScores)
     
     bestTypes, softmaxes, bestLabels, inputImages, inputMinMaxIndexes = classification._input_spectra_info()
 
@@ -145,7 +145,7 @@ def make_set_predictions(testset, valset,alpha = 0.1,classifyHost=False, knownZ=
                                                                    testset.redshift_list[i], classifyHost, 
                                                                    knownZ, smooth, rlapScores)
         conformal_setpred.append(conformal_set(aggr_softmax, predlabels, conformal_cut))
-        topclass_setpred.append(top_class_set(aggr_softmax, predlabels, alpha, True))
+        topclass_setpred.append(top_class_set(aggr_softmax, predlabels, alpha, False))
 
     return testset.typelist, conformal_setpred, topclass_setpred
     
