@@ -4,3 +4,6 @@ data/ZTFBTS_spectra
 script/.ipynb_checkpoints/
 script/sandbox.py
 script/__pycache__
+*.json
+*.sh.log*
+*.jpg

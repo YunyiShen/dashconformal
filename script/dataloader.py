@@ -31,6 +31,7 @@ class spectra_redshift_type:
         self.spectra_dir = spectra_dir
         self.n = df.shape[0]
         self.n_valid = None
+        self.filter = filter
 
         self.file_names_list = []
         self.spectra_list = []
@@ -39,21 +40,23 @@ class spectra_redshift_type:
         self.shuffle = None
         self.failed_to_read = []
     
-    def readin_spectra(self): # actually load things
+    def readin_spectra(self, maxread = 100000): # actually load things
         print("Loading spectra data...")
         self.n_valid = 0
-        for i in tqdm(range(self.n)): # for each file
+        for i in tqdm(range(min(self.n, maxread))): # for each file
             try:
-                file_name = np.array(self.mastersheet['ZTFID'])[i]
-                freq_ary, spec_ary, _, _, _ = load_spectras(self.spectra_dir, filenames = [file_name])
-                argsoted_freq = np.argsort(freq_ary[0])
-                self.spectra_list.append(np.array([freq_ary[0][argsoted_freq], 
+                thistype = np.array(self.mastersheet['type'])[i]
+                if(any(self.filter == thistype)):
+                    file_name = np.array(self.mastersheet['ZTFID'])[i]
+                    freq_ary, spec_ary, _, _, _ = load_spectras(self.spectra_dir, filenames = [file_name])
+                    argsoted_freq = np.argsort(freq_ary[0])
+                    self.spectra_list.append(np.array([freq_ary[0][argsoted_freq], 
                                                spec_ary[0][argsoted_freq]]))
                 
-                self.file_names_list.append(file_name)
-                self.type_list.append(np.array(self.mastersheet['type'])[i])
-                self.redshift_list.append(np.array(self.mastersheet['redshift'])[i])
-                self.n_valid += 1
+                    self.file_names_list.append(file_name)
+                    self.type_list.append(thistype)
+                    self.redshift_list.append(np.array(self.mastersheet['redshift'])[i])
+                    self.n_valid += 1
             except:
                 self.failed_to_read.append(np.array(self.mastersheet['ZTFID'])[i])
                 #print(np.array(self.mastersheet['ZTFID'])[i], " having issue")

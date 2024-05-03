@@ -1,6 +1,6 @@
 import numpy as np
 import astrodash
-
+from tqdm import tqdm
 
 #################################
 ### things related to calibration
@@ -38,15 +38,16 @@ def aggregate_softmax(SNlabels, softmaxscore):
 
 def predict_just_class_for_one_star(filenames, redshift, 
                         classifyHost=False, knownZ=True, 
-                        smooth=6, rlapScores=True):
+                        smooth=6, rlapScores=True, aggrclass = True):
     classification = astrodash.Classify([filenames], [redshift], classifyHost=classifyHost, 
                                         knownZ=knownZ, smooth = smooth, rlapScores = rlapScores)
     
     bestTypes, softmaxes, bestLabels, inputImages, inputMinMaxIndexes = classification._input_spectra_info()
-    SNlabels, aggr_softmax = aggregate_softmax(extract_just_class(bestTypes[0]), softmaxes[0])
-    SNlabels = clean_labels(SNlabels)
-    return SNlabels, aggr_softmax
-
+    if aggrclass:
+        SNlabels, aggr_softmax = aggregate_softmax(extract_just_class(bestTypes[0]), softmaxes[0])
+        SNlabels = clean_labels(SNlabels)
+        return SNlabels, aggr_softmax
+    return bestTypes[0], softmaxes[0]
 
 def extract_correct_softmax(filenames, redshift, trueclass, 
                             classifyHost=False, knownZ=True, 
@@ -83,15 +84,19 @@ def calculate_softmax_cutoff(softmax_scores, alpha = 0.1):
     Calculate softmax cutoff using observed correct softmax scores
     '''
     n = softmax_scores.shape[0]
-    q_level = np.ceil((n+1)*(1-alpha))/n
-    cal_scores = 1- softmax_scores
+    q_level = np.ceil((n+1)*(1.-alpha))/n
+    #cal_scores = 1.- softmax_scores
+    cal_scores = - np.log(softmax_scores + 1.e-22)
     qhat = np.quantile(cal_scores, q_level, interpolation='higher')
+    #print(np.log(softmax_scores))
+    #print(np.log(cal_scores))
+    #print(n, q_level, qhat)
     
-    return 1 - qhat
+    return - qhat
 
 def conformal_cutoffs(valset,alpha = 0.1,classifyHost=False, knownZ=True, 
                       smooth=6, rlapScores=True):
-    softmaxes = extract_correct_softmax(valset.spectra_list, valset.redshift_list,
+    softmaxes = extract_correct_softmax(valset.spectra_list, valset.redshift_list,valset.type_list,
                                         classifyHost, knownZ, 
                                         smooth, rlapScores)
     cutoff = calculate_softmax_cutoff(softmaxes, alpha)
@@ -131,7 +136,7 @@ def top_class_set(scores, labels, alpha = 0.1, sorted = True):
 
 
 def conformal_set(scores, labels, thr):
-    return labels[scores >= thr]
+    return labels[np.log(scores + 1.e-22) >= thr]
 
 
 def make_set_predictions(testset, valset,alpha = 0.1,classifyHost=False, knownZ=True, 
@@ -140,14 +145,16 @@ def make_set_predictions(testset, valset,alpha = 0.1,classifyHost=False, knownZ=
                       smooth, rlapScores)
     conformal_setpred = []
     topclass_setpred = []
-    for i in range(len(testset.spectra_list)):
+    point_pred = []
+    for i in tqdm(range(len(testset.spectra_list))):
         predlabels, aggr_softmax = predict_just_class_for_one_star(testset.spectra_list[i],
                                                                    testset.redshift_list[i], classifyHost, 
                                                                    knownZ, smooth, rlapScores)
+        point_pred.append(predlabels[np.argmax(aggr_softmax)])
         conformal_setpred.append(conformal_set(aggr_softmax, predlabels, conformal_cut))
         topclass_setpred.append(top_class_set(aggr_softmax, predlabels, alpha, False))
 
-    return testset.typelist, conformal_setpred, topclass_setpred
+    return testset.type_list, point_pred, conformal_setpred, topclass_setpred, conformal_cut
     
 
 
