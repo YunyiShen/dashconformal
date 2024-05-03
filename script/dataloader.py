@@ -1,13 +1,95 @@
 import os
-import torch
-import h5py
 import numpy as np
 from typing import List, Tuple, Optional
 
 import pandas as pd
-import matplotlib.pyplot as plt
+#import matplotlib.pyplot as plt
 from tqdm import tqdm
 from astropy.cosmology import Planck15 as cosmo  # Using Planck15 cosmology by default
+
+class spectra_redshift_type:
+    def __init__(self, data_dir = "../data/ZTFBTS", 
+                 spectra_dir = "../data/ZTFBTS_spectra",
+                 drop_non_SN = True, 
+                 drop_SN_in_type_name = True, 
+                 filter = np.array(['II-pec', 'II', 'IIP', 'IIb', 'IIn', 'Iax', 'Ia-91T',
+                                    'Ia-91bg', 'Ia-CSM', 'Ia', 'Ia-pec', 'Ib', 'Ib-pec',
+                                    'Ibn', 'Ic-BL', 'Ic', 'Ic-pec'])
+                 ,quiet = False):
+        if not quiet:
+            print("Loading master sheet...")
+        df = pd.read_csv(f"{data_dir}/ZTFBTS_TransientTable.csv")
+        df["redshift"] = pd.to_numeric(df["redshift"], errors="coerce")
+        df = df.dropna(subset=["redshift", "type"])
+        if drop_non_SN:
+            df = df[df['type'].str.contains("SN ")]
+        if drop_SN_in_type_name:
+            df['type'] = df['type'].str.replace("SN ", "")
+        
+        self.mastersheet = df
+        self.data_dir = data_dir
+        self.spectra_dir = spectra_dir
+        self.n = df.shape[0]
+        self.n_valid = None
+
+        self.file_names_list = []
+        self.spectra_list = []
+        self.type_list = []
+        self.redshift_list = []
+        self.shuffle = None
+        self.failed_to_read = []
+    
+    def readin_spectra(self): # actually load things
+        print("Loading spectra data...")
+        self.n_valid = 0
+        for i in tqdm(range(self.n)): # for each file
+            try:
+                file_name = np.array(self.mastersheet['ZTFID'])[i]
+                freq_ary, spec_ary, _, _, _ = load_spectras(self.spectra_dir, filenames = [file_name])
+                argsoted_freq = np.argsort(freq_ary[0])
+                self.spectra_list.append(np.array([freq_ary[0][argsoted_freq], 
+                                               spec_ary[0][argsoted_freq]]))
+                
+                self.file_names_list.append(file_name)
+                self.type_list.append(np.array(self.mastersheet['type'])[i])
+                self.redshift_list.append(np.array(self.mastersheet['redshift'])[i])
+                self.n_valid += 1
+            except:
+                self.failed_to_read.append(np.array(self.mastersheet['ZTFID'])[i])
+                #print(np.array(self.mastersheet['ZTFID'])[i], " having issue")
+            
+
+    def reshuffle(self):
+        idx = np.array([i for i in range(self.n_valid)])
+        np.random.shuffle(idx)
+        self.shuffle = idx
+
+    def get_split(self, proportion_cal = 0.5):
+        assert proportion_cal < 1.
+        if self.shuffle is None:
+            self.reshuffle()
+        n_cal = int(proportion_cal * self.n_valid)
+
+        cal_set = spectra_redshift_type(data_dir=self.data_dir, spectra_dir=self.spectra_dir, quiet = True)
+        test_set = spectra_redshift_type(data_dir=self.data_dir, spectra_dir=self.spectra_dir, quiet = True)
+
+        cal_set.n = n_cal
+        test_set.n = self.n_valid-n_cal
+
+        cal_set.file_names_list = [self.file_names_list[i] for i in self.shuffle[:n_cal]]
+        cal_set.spectra_list = [self.spectra_list[i] for i in self.shuffle[:n_cal]]
+        cal_set.type_list = [self.type_list[i] for i in self.shuffle[:n_cal]]
+        cal_set.redshift_list = [self.redshift_list[i] for i in self.shuffle[:n_cal]]
+
+        test_set.file_names_list = [self.file_names_list[i] for i in self.shuffle[n_cal:]]
+        test_set.spectra_list = [self.spectra_list[i] for i in self.shuffle[n_cal:]]
+        test_set.type_list = [self.type_list[i] for i in self.shuffle[n_cal:]]
+        test_set.redshift_list = [self.redshift_list[i] for i in self.shuffle[n_cal:]]
+
+        return cal_set, test_set
+
+
+
 
 ### utils for data, ported from https://github.com/ThomasHelfer/multimodal-supernovae/tree/main/src
 
@@ -214,14 +296,14 @@ def load_spectras(
     Returns:
         Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, List[str]]: A tuple containing
         arrays of time, magnitude, magnitude error, mask, and filenames.
-        - time (np.ndarray): Array of frequency values for each observation.
+        - freq (np.ndarray): Array of frequency values for each observation.
         - spec (np.ndarray): Array of spectrum values for each observation.
         - specerr (np.ndarray): Array of spectrum error values for each observation.
         - mask (np.ndarray): Array indicating which observations are not padding.
         - filenames_loaded (List[str]): List of filenames corresponding to the loaded data.
     """
 
-    print("Loading spectra ...")
+    #print("Loading spectra ...")
     dir_data = f"{data_dir}"
 
     def open_spectra_csv(filename: str) -> pd.DataFrame:
@@ -239,7 +321,7 @@ def load_spectras(
 
     mask_list, spec_list, specerr_list, freq_list, filenames_loaded = [], [], [], [], []
 
-    for filename in tqdm(filenames):
+    for filename in filenames:
         if filename.endswith(".csv"):
             spectra_df = open_spectra_csv(filename)
             max_columns = spectra_df.shape[1]

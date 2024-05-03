@@ -1,6 +1,10 @@
 import numpy as np
 import astrodash
 
+
+#################################
+### things related to calibration
+#################################
 def extract_just_class(stringarray):
     '''
     Args: a np.array of strings, that has form of '<something I want>: <something I don't want>'
@@ -12,6 +16,10 @@ def extract_just_class(stringarray):
         return string.split(":")[0].strip()
     vectorized_func = np.vectorize(extract_desired_part)
     return vectorized_func(stringarray)
+
+def clean_labels(stringarray):
+    return np.array([i.replace("IIL", "II").replace("-norm", "").replace("-csm","-CSM").replace("-broad", "-BL").replace("-02cx","x") for i in stringarray])
+
 
 
 def aggregate_softmax(SNlabels, softmaxscore):
@@ -26,11 +34,127 @@ def aggregate_softmax(SNlabels, softmaxscore):
     for i, label in enumerate(unique_labels):
         indices = np.where(SNlabels == label)  # Get indices where label appears
         aggregated_values[i] = np.sum(softmaxscore[indices])  # Aggregate values
-    return aggregated_values
+    return unique_labels, aggregated_values
+
+def predict_just_class_for_one_star(filenames, redshift, 
+                        classifyHost=False, knownZ=True, 
+                        smooth=6, rlapScores=True):
+    classification = astrodash.Classify([filenames], [redshift], classifyHost, 
+                                        knownZ, smooth, rlapScores)
+    
+    bestTypes, softmaxes, bestLabels, inputImages, inputMinMaxIndexes = classification._input_spectra_info()
+    SNlabels, aggr_softmax = aggregate_softmax(bestTypes[0], softmaxes[0])
+    SNlabels = clean_labels(SNlabels)
+    return SNlabels, aggr_softmax
+
 
 def extract_correct_softmax(filenames, redshift, trueclass, 
                             classifyHost=False, knownZ=True, 
                             smooth=6, rlapScores=True):
+    '''
+    This to extract softmax scores of the correct class in the validation set
+
+    Args:
+        filenames: either file name or a list of spectra
+        redshift: list of known redshift (so assume for now)
+        true class: list of true classes
+        ... : other things for astrodash
+    Value:
+        a np.array with soft max scores of the right class
+    '''
+    assert len(filenames) == len(redshift)
+    assert len(filenames) == len(trueclass)
     classification = astrodash.Classify(filenames, redshift, classifyHost, 
                                         knownZ, smooth, rlapScores)
+    
+    bestTypes, softmaxes, bestLabels, inputImages, inputMinMaxIndexes = classification._input_spectra_info()
 
+    out_softmax = []
+    for i in range(len(trueclass)):
+        this_star_types = clean_labels( extract_just_class(bestTypes[i]) )
+        this_star_softmax = softmaxes[i]
+        # accumulated soft max score
+        out_softmax.append(np.sum(this_star_softmax[this_star_types == trueclass[i]]))
+
+    return np.array(out_softmax)
+
+def calculate_softmax_cutoff(softmax_scores, alpha = 0.1):
+    '''
+    Calculate softmax cutoff using observed correct softmax scores
+    '''
+    n = softmax_scores.shape[0]
+    q_level = np.ceil((n+1)*(1-alpha))/n
+    cal_scores = 1- softmax_scores
+    qhat = np.quantile(cal_scores, q_level, interpolation='higher')
+    
+    return 1 - qhat
+
+def conformal_cutoffs(valset,alpha = 0.1,classifyHost=False, knownZ=True, 
+                      smooth=6, rlapScores=True):
+    softmaxes = extract_correct_softmax(valset.spectra_list, valset.redshift_list,
+                                        classifyHost, knownZ, 
+                                        smooth, rlapScores)
+    cutoff = calculate_softmax_cutoff(softmaxes, alpha)
+    return softmaxes, cutoff
+
+#################################
+### things related to set prediction
+#################################
+
+def top_class_set(scores, labels, alpha = 0.1, sorted = True):
+    '''
+    Take an array of softmax scores, find the indices that accumulated towards some threshold
+    Args:
+        scores: an array of softmax scores
+        labels: an array of labels corresponding to softmax scores
+        alpha: 1-threshold
+        sorted: if the scores are sorted already in decending order
+    Return:
+        a list of labels that cummulate softmax scores to the threshold
+    '''
+
+    threshold = 1-alpha
+    if not sorted:
+        sorted_indices = np.argsort(scores)[::-1]  # Sort indices of scores array in descending order
+    else:
+        sorted = range(scores.shape[0])
+    cumulative_sum = 0
+    top_indices = []
+    
+    for idx in sorted_indices:
+        cumulative_sum += scores[idx]
+        top_indices.append(idx)
+        if cumulative_sum >= threshold:
+            break
+    
+    return labels[top_indices]
+
+
+def conformal_set(scores, labels, thr):
+    return labels[scores >= thr]
+
+
+def make_set_predictions(testset, valset,alpha = 0.1,classifyHost=False, knownZ=True, 
+                      smooth=6, rlapScores=True):
+    _, conformal_cut = conformal_cutoffs(valset,alpha,classifyHost, knownZ, 
+                      smooth, rlapScores)
+    conformal_setpred = []
+    topclass_setpred = []
+    for i in range(len(testset.spectra_list)):
+        predlabels, aggr_softmax = predict_just_class_for_one_star(testset.spectra_list[i],
+                                                                   testset.redshift_list[i], classifyHost, 
+                                                                   knownZ, smooth, rlapScores)
+        conformal_setpred.append(conformal_set(aggr_softmax, predlabels, conformal_cut))
+        topclass_setpred.append(top_class_set(aggr_softmax, predlabels, alpha, True))
+
+    return testset.typelist, conformal_setpred, topclass_setpred
+    
+
+
+
+#################################
+### things related to check
+#################################
+def is_covered(setpred, true_labels):
+    assert len(true_labels) == len(setpred)
+    return np.array([np.any(setpred[i] == true_labels[i]) for i in range(len(true_labels))])
